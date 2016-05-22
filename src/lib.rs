@@ -21,3 +21,4 @@ pub mod readhex;
 pub mod parse;
 pub mod validate;
 pub mod nodes;
+pub mod strings;
