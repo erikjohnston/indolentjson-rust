@@ -9,5 +9,9 @@ linear-map = "1.0.0"
 quickcheck = {version = "0.2", optional = true}
 quickcheck_macros = {version = "0.2", optional = true}
 
+[dev-dependencies]
+afl = "0.1"
+afl-plugin = "0.1"
+
 [features]
 quickcheck_test = ["quickcheck", "quickcheck_macros"]  # Enables testing with quickcheck
