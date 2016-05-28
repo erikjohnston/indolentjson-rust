@@ -13,6 +13,11 @@
  * limitations under the License.
  */
 
+#![cfg_attr(all(test, feature = "quickcheck_test"), feature(plugin))]
+#![cfg_attr(all(test, feature = "quickcheck_test"), plugin(quickcheck_macros))]
+
+#[cfg(all(test, feature = "quickcheck_test"))]
+extern crate quickcheck;
 extern crate itertools;
 extern crate linear_map;
 
