@@ -38,3 +38,18 @@ fn parse_nodes(b : &mut Bencher) {
 
     b.iter(|| { JsonNode::from_node_ext(&first_node) });
 }
+
+
+#[bench]
+fn parse_bytes_uncompact(b : &mut Bencher) {
+    b.iter(|| { JsonNode::from_input(TEST_STRING) });
+}
+
+#[bench]
+fn parse_bytes_compact(b : &mut Bencher) {
+    let mut compacted = Vec::new();
+
+    compact(TEST_STRING, &mut compacted).unwrap();
+
+    b.iter(|| { JsonNode::from_input(&compacted) });
+}

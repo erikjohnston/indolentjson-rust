@@ -1,8 +1,10 @@
-use ::parse::*;
+use compact::*;
+use parse::*;
 
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::str;
+use std::ops::Range;
 
 use itertools::Itertools;
 
@@ -88,11 +90,57 @@ impl<'a> Iterator for NodeCollection<'a> {
     }
 }
 
+pub struct NodeIterator<'a> {
+    nodes: &'a [Node],
+    next_offset: usize,
+    next_index: usize,
+    iterations: usize,
+    total_children: usize,
+}
+
+impl<'a> NodeIterator<'a> {
+    pub fn from_nodes(nodes: &'a [Node]) -> NodeIterator<'a> {
+        NodeIterator {
+            nodes: nodes,
+            next_offset: 1,
+            next_index: 1,
+            iterations: 0,
+            total_children: nodes.get(0).map_or(0, |n| n.children as usize),
+        }
+    }
+}
+
+impl<'a> Iterator for NodeIterator<'a> {
+    type Item = (&'a [Node], Range<usize>);
+
+    fn next(&mut self) -> Option<(&'a [Node], Range<usize>)> {
+        if self.next_index < self.nodes.len() && self.iterations < self.total_children {
+            let node = &self.nodes[self.next_index];
+            let num_children = node.children as usize;
+
+            let range = Range {
+                start: self.next_offset,
+                end: self.next_offset + node.length_in_bytes as usize,
+            };
+
+            let nodes = &self.nodes[self.next_index..self.next_index + 1 + num_children];
+
+            self.next_offset += node.length_in_bytes as usize + 1;
+            self.next_index += num_children + 1;
+            self.iterations += 1;
+
+            Some((nodes, range))
+        } else {
+            None
+        }
+    }
+}
+
 
 #[derive(Debug, Clone)]
 pub struct ObjectNode<'a> {
     raw: Option<Cow<'a, str>>,
-    map: LinearMap<StringNode<'a>, JsonNode<'a>>,
+    pub map: LinearMap<StringNode<'a>, JsonNode<'a>>,
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +190,34 @@ impl<'a> ObjectNode<'a> {
                 }
                 vec
             }
+        }
+    }
+
+    pub fn from_nodes(nodes: &[Node], input: Cow<'a, str>) -> ObjectNode<'a> {
+        ObjectNode {
+            map: {
+                let mut vec = LinearMap::with_capacity(nodes[0].children as usize);
+                let mut iter = NodeIterator::from_nodes(nodes);
+                while let Some((keyt, valt)) = iter.next().and_then(|k| iter.next().map(|v| (k,v))) {
+                    let (key_subnodes, key_range) = keyt;
+                    let (val_subnodes, val_range) = valt;
+                    vec.insert(
+                        match JsonNode::from_nodes(&key_subnodes, match input {
+                            Cow::Borrowed(ref s) => Cow::Borrowed(&s[key_range]),
+                            Cow::Owned(ref s) => Cow::Owned(s[key_range].to_string())
+                        }) {
+                            JsonNode::String(string_node) => string_node,
+                            _ => panic!("Invalid key type"),
+                        },
+                        JsonNode::from_nodes(&val_subnodes, match input {
+                            Cow::Borrowed(ref s) => Cow::Borrowed(&s[val_range]),
+                            Cow::Owned(ref s) => Cow::Owned(s[val_range].to_string())
+                        }),
+                    );
+                }
+                vec
+            },
+            raw: Some(input),
         }
     }
 
@@ -230,6 +306,55 @@ impl<'a> JsonNode<'a> {
         }
     }
 
+    pub fn from_nodes(nodes: &[Node], input: Cow<'a, str>) -> JsonNode<'a> {
+        match input.as_bytes()[0] {
+            b't' => JsonNode::Boolean(true),
+            b'f' => JsonNode::Boolean(false),
+            b'n' => JsonNode::Null,
+            b'"' => JsonNode::String(StringNode{
+                raw: Some(input),
+            }),
+            b'{' => JsonNode::Object(ObjectNode::from_nodes(nodes, input)),
+            b'[' => JsonNode::Array(ArrayNode {
+                nodes: {
+                    let mut vec = Vec::with_capacity(nodes[0].children as usize);
+                    for (subnodes, range) in NodeIterator::from_nodes(nodes) {
+                        vec.push(JsonNode::from_nodes(subnodes, match input {
+                            Cow::Borrowed(ref s) => Cow::Borrowed(&s[range]),
+                            Cow::Owned(ref s) => Cow::Owned(s[range].to_string())
+                        }))
+                    }
+                    vec
+                },
+                raw: Some(input),
+            }),
+            b'-' | b'0'...b'9' => JsonNode::Number(NumberNode {
+                raw: Some(input),
+            }),
+            d @ _ => {
+                println!("Unexpected char: {:?}", d);
+                panic!("WUT?")
+            },
+        }
+    }
+
+    pub fn from_input(input: &'a [u8]) -> Result<JsonNode<'a>, ()> {
+        let mut compacted: Vec<u8> = Vec::new();
+        let mut nodes: Vec<Node> = Vec::new();
+        let mut parse_stack: Vec<Stack> = Vec::new();
+
+        try!(compact(input, &mut compacted));
+        try!(parse(&compacted[..], &mut nodes, &mut parse_stack));
+
+        if input == &compacted[..] {
+            let compacted_str = try!(str::from_utf8(&input).map_err(|_| ()));
+            Ok(JsonNode::from_nodes(&nodes, compacted_str.into()))
+        } else {
+            let compacted_str = try!(String::from_utf8(compacted).map_err(|_| ()));
+            Ok(JsonNode::from_nodes(&nodes, compacted_str.into()))
+        }
+    }
+
     pub fn to_string(&'a self) -> Cow<'a, str> {
         match *self {
             JsonNode::Object(ref node) => {
@@ -258,6 +383,60 @@ mod tests {
     use super::*;
 
     use std::str;
+
+    #[test]
+    fn node_iter() {
+        let test_string: &str = r#"{
+            "A longish bit of JSON": true,
+            "containing": {
+                "whitespace": " ",
+                "unicode escapes ": "\uFFFF\u0FFF\u007F\uDBFF\uDFFF",
+                "other sorts of esacpes": "\b\t\n\f\r\"\\\/",
+                "unicode escapes for the other sorts of escapes":
+                    "\u0008\u0009\u000A\u000C\u000D\u005C\u0022",
+                "numbers": [0, 1, 1e4, 1.0, -1.0e7 ],
+                "and more": [ true, false, null ]
+            },
+            "and_even_more": "blah"
+        }"#;
+
+        let mut compacted: Vec<u8> = Vec::new();
+        let mut nodes: Vec<Node> = Vec::new();
+        let mut parse_stack: Vec<Stack> = Vec::new();
+
+        compact(test_string.as_bytes(), &mut compacted).unwrap();
+        parse(&compacted[..], &mut nodes, &mut parse_stack).unwrap();
+
+        let mut iter = NodeIterator::from_nodes(&nodes);
+
+        assert_eq!(iter.next().map(|k| k.1), Some(1..24))
+    }
+
+    #[test]
+    fn from_nodes() {
+        let test_string: &str = r#"{
+            "A longish bit of JSON": true,
+            "containing": {
+                "whitespace": " ",
+                "unicode escapes ": "\uFFFF\u0FFF\u007F\uDBFF\uDFFF",
+                "other sorts of esacpes": "\b\t\n\f\r\"\\\/",
+                "unicode escapes for the other sorts of escapes":
+                    "\u0008\u0009\u000A\u000C\u000D\u005C\u0022",
+                "numbers": [0, 1, 1e4, 1.0, -1.0e7 ],
+                "and more": [ true, false, null ]
+            },
+            "and_even_more": "blah"
+        }"#;
+
+        let json_node = JsonNode::from_input(&test_string.as_bytes()).unwrap();
+
+        let obj = match json_node {
+            JsonNode::Object(obj) => obj,
+            _ => panic!("Expeected object")
+        };
+
+        assert_eq!(obj.map.len(), 3);
+    }
 
     #[test]
     fn remove_key() {
