@@ -273,6 +273,63 @@ mod tests {
     }
 
     #[test]
+    fn discard_first() {
+        let mut value = Value::from_slice(TEST_STRING);
+
+        value.discard_key(b"ab");
+
+        assert_eq!(&value.compacted, br#"{"cd":34,"ef":56}"#);
+    }
+
+    #[test]
+    fn discard_middle() {
+        let mut value = Value::from_slice(TEST_STRING);
+
+        value.discard_key(b"cd");
+
+        assert_eq!(&value.compacted, br#"{"ab":12,"ef":56}"#);
+    }
+
+    #[test]
+    fn discard_last() {
+        let mut value = Value::from_slice(TEST_STRING);
+
+        value.discard_key(b"ef");
+
+        assert_eq!(&value.compacted, br#"{"ab":12,"cd":34}"#);
+    }
+
+    #[test]
+    fn discard_first_and_last() {
+        let mut value = Value::from_slice(br#"{"ab":12}"#);
+
+        value.discard_key(b"ab");
+
+        assert_eq!(&value.compacted, br#"{}"#);
+    }
+
+    #[test]
+    fn discard_multiple() {
+        let mut value = Value::from_slice(TEST_STRING);
+
+        value.discard_key(b"ab");
+        value.discard_key(b"cd");
+
+        assert_eq!(&value.compacted, br#"{"ef":56}"#);
+    }
+
+    #[test]
+    fn discard_all() {
+        let mut value = Value::from_slice(TEST_STRING);
+
+        value.discard_key(b"ab");
+        value.discard_key(b"cd");
+        value.discard_key(b"ef");
+
+        assert_eq!(&value.compacted, br#"{}"#);
+    }
+
+    #[test]
     fn removed_value() {
         let mut value = Value::from_slice(TEST_STRING);
 
