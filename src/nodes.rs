@@ -35,6 +35,17 @@ impl Value {
         &self.compacted
     }
 
+    pub fn get_key(&self, key: &[u8]) -> Option<(&[Node], &[u8])> {
+        if let Some((nodes_range, compacted_range, value_range)) = self.find_key_parts(key) {
+            Some((
+                &self.nodes[nodes_range.start + 1..nodes_range.end],
+                &self.compacted[compacted_range.start + value_range.start..compacted_range.start + value_range.end],
+            ))
+        } else {
+            None
+        }
+    }
+
     pub fn prepend_key(&mut self, key: &[u8], value: &Value) {
         if self.compacted[0] == b'{' {
             self.compacted.insert(1, b'"');
@@ -366,5 +377,18 @@ mod tests {
             value,
             Value::from_slice(&br#"{"wibble":{"test":12345}}"#[..])
         );
+    }
+
+    #[test]
+    fn get_key() {
+        let value = Value::from_slice(TEST_STRING);
+        let (nodes, bytes) = value.get_key(b"cd").unwrap();
+        assert_eq!(bytes, b"34");
+        assert_eq!(nodes, &Value::from_slice(b"34").nodes[..]);
+
+        let value = Value::from_slice(br#"{"ab":12,"cd":34,"ef":56,"wibble":{"test":12345}}"#);
+        let (nodes, bytes) = value.get_key(b"wibble").unwrap();
+        assert_eq!(bytes, br#"{"test":12345}"#);
+        assert_eq!(nodes, &Value::from_slice(br#"{"test":12345}"#).nodes[..]);
     }
 }
