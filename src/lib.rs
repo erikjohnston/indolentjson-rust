@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+#![feature(conservative_impl_trait)]
+
 #![cfg_attr(all(test, feature = "quickcheck_test"), feature(plugin))]
 #![cfg_attr(all(test, feature = "quickcheck_test"), plugin(quickcheck_macros))]
 
@@ -21,6 +23,8 @@ pub mod readhex;
 pub mod parse;
 pub mod validate;
 pub mod strings;
+
+pub mod nodes;
 
 #[cfg(all(test, feature = "quickcheck_test"))]
 extern crate quickcheck;

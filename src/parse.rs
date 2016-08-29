@@ -42,7 +42,7 @@
 ///
 /// JSON objects start with `b'{' == 0x7B`. The direct children of the node
 /// alternate between JSON string keys and their values.
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct Node {
     pub children: u32,
     pub length_in_bytes: u32,
